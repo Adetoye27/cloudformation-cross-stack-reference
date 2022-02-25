@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Deploy a new stack that will setup a Linux EC2 instance (Web server) and reference the sample network stack previously created.
+  Deploy template in us-west-2 region. 
+
+# Create parameters for requesting user inputs as much as possible.
+Parameters:
+#Availability Zone
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+
+# Description of the security Group
+  SecurityGroupDescription:
+    Description: Security Group Description (Simple parameter)
+    Type: String
+
+# DB Pwd should not be visible
+  DBPwd:
+    NoEcho: true
+    Description: The database admin account password (won't be echoed)
+    Type: String
+
+# Security Group Port Number
+  SecurityGroupPort:
+    Description: Open port 22 to the world
+    Type: Number
+    MinValue: 20 # out range 19
+    MaxValue: 65535
+
+# Inbound Rule for port 22 Open to the world
+  SecurityGroupIngressCIDR:
+    Description: Allows HTTP
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+
+#InstanceType Parameter
+  InstanceType:
+    Description: WebServer EC2 instance type (has default, AllowedValues)
+    Type: String
+    Default: t2.micro
+    AllowedValues: #possible values
+      - t1.micro
+      - t2.nano
+      - t2.micro
+      - t2.small
+    ConstraintDescription: must be a valid EC2 instance type
+
+# KeyName Parameter
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances. Linked to AWS Parameter
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+
+# My VPC parameter
+  MyVPC:
+    Description: VPC to operate in
+    Type: AWS::EC2::VPC::Id
+
+Mappings: 
+  RegionMap: 
+    us-east-1: 
+      "HVM64": "ami-0ff8a91507f77f867"
+    us-west-1: 
+      "HVM64": "ami-0bdb828fd58c52235"
+    us-west-2: 
+      "HVM64": "ami-0341aeea105412b57"
+    ap-southeast-1: 
+      "HVM64": "ami-08569b978cc4dfa10"
+
+
+
+
+Resources:
+  MyNewInstance: 
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone
+      ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", HVM64]
+      KeyName: !Ref KeyName
+      SubnetId: !ImportValue SampleNetworkCrossStack-SubnetID
+      InstanceType: !Ref InstanceType
+      SecurityGroupIds: 
+        -  !Ref SSHSecurityGroup
+        - !ImportValue SampleNetworkCrossStack-SecurityGroupID
+  #Install and configure apache on the EC2 using User data to display your name a webpage.
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd 
+          systemctl start httpd
+          systemctl enable httpd 
+          echo "Adetoye Abodunrin" > /var/www/html/index.html         
+   
+      Tags:
+        - Key: Name
+          Value: Ec2WebServer 
+
+# Allocate an Elastic IP address using resources.
+  MyEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref MyNewInstance
+
+  SSHSecurityGroup:  #Security Group Resource
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Ref SecurityGroupDescription
+      SecurityGroupIngress:
+      # Allow access to port 22
+        - CidrIp: !Ref SecurityGroupIngressCIDR
+          FromPort: !Ref SecurityGroupPort
+          IpProtocol: tcp
+          ToPort: !Ref SecurityGroupPort
+      VpcId: !ImportValue SampleNetworkCrossStack-VPCID
+
+# Output the values of the private IPv4 address and DNS name of the EC2 instance.
+Outputs:
+  EC2PrivateDNS:
+    Description: 'Private DNS of EC2 instance'
+    Value: !GetAtt 
+      - MyNewInstance
+      - PrivateDnsName
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateDNSName'
+
+  PrivateIpv4:
+    Description: 'Private IPV4 of EC2 instance'
+    Value: !GetAtt 
+      - MyNewInstance
+      - PrivateIp
+    Export:
+      Name: !Sub '${AWS::StackName}-PrivateIpv4'
+
+
